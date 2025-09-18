@@ -4,6 +4,8 @@ from typing import List, Literal, Optional
 from datasets import Dataset, Features, Sequence, Value, load_dataset
 from pydantic import BaseModel, Field
 
+import art
+
 # Email and Scenario data models
 class Email(BaseModel):
     message_id: str
@@ -37,3 +39,10 @@ class SearchResult:
 class FinalAnswer(BaseModel):
     answer: str
     source_ids: list[str]
+
+class ProjectTrajectory(art.Trajectory):
+    final_answer: FinalAnswer | None = None
+    
+class EmailScenario(BaseModel):
+    step: int
+    scenario: Scenario
