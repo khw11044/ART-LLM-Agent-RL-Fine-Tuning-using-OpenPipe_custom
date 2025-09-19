@@ -7,10 +7,9 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain.agents import create_agent
 from langgraph.prebuilt import create_react_agent
 from langchain_core.tools import tool
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from textwrap import dedent
 
-from tenacity import retry, stop_after_attempt
 
 from tasks.email.model import *
 from tasks.email.functions import *
@@ -22,17 +21,17 @@ from utils.judgement_llm import judge_correctness
 @weave.op
 async def rollout(
     model: art.Model, 
-    email_scenario: EmailScenario,
+    task_scenario,
     MAX_TURNS = 20
 ) -> ProjectTrajectory:
-    scenario = email_scenario.scenario
+    scenario = task_scenario.scenario
 
     traj = ProjectTrajectory(
         reward=0.0,
         messages_and_choices=[],
         metadata={
             "scenario_id": scenario.id,
-            "step": email_scenario.step,
+            "step": task_scenario.step,
         },
     )
 

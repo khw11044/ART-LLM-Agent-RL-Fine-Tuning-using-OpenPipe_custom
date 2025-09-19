@@ -3,7 +3,6 @@ import random
 from typing import List, Literal, Optional
 from datasets import Dataset, load_dataset
 
-
 from tasks.email.model import Scenario
 
 def load_training_scenarios(
@@ -47,25 +46,26 @@ def load_training_scenarios(
     print(f"Loaded {len(scenarios)} scenarios.")
     return scenarios
 
+if __name__=="__main__":
 
-# Load training scenarios
-training_scenarios = load_training_scenarios(
-    split="train", limit=50, max_messages=1, shuffle=True, seed=42,
-    SCENARIO_DATASET_REPO_ID="corbt/enron_emails_sample_questions"
-)
+    # Load training scenarios
+    training_scenarios = load_training_scenarios(
+        split="train", limit=50, max_messages=1, shuffle=True, seed=42,
+        SCENARIO_DATASET_REPO_ID="corbt/enron_emails_sample_questions"
+    )
 
-print("Email search environment created with full Enron dataset!")
-print(
-    f"Database contains the complete email dataset, loaded {len(training_scenarios)} training scenarios."
-)
+    print("Email search environment created with full Enron dataset!")
+    print(
+        f"Database contains the complete email dataset, loaded {len(training_scenarios)} training scenarios."
+    )
 
-# print first scenario
-print("\nSample scenario")
-print("id:", training_scenarios[0].id)
-print("question:", training_scenarios[0].question)
-print("answer:", training_scenarios[0].answer)
-print("message_ids:", training_scenarios[0].message_ids)
-print("how_realistic:", training_scenarios[0].how_realistic)
-print("inbox_address:", training_scenarios[0].inbox_address)
-print("query_date:", training_scenarios[0].query_date)
-print("split:", training_scenarios[0].split)
+    # print first scenario
+    print("\nSample scenario")
+    print("id:", training_scenarios[0].id)
+    print("question:", training_scenarios[0].question)
+    print("answer:", training_scenarios[0].answer)
+    print("message_ids:", training_scenarios[0].message_ids)
+    print("how_realistic:", training_scenarios[0].how_realistic)
+    print("inbox_address:", training_scenarios[0].inbox_address)
+    print("query_date:", training_scenarios[0].query_date)
+    print("split:", training_scenarios[0].split)
