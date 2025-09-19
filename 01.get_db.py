@@ -15,8 +15,8 @@ from utils.database_schema import SQL_CREATE_TABLES, SQL_CREATE_INDEXES_TRIGGERS
 
 # Database configuration
 DB_PATH = "./enron_emails.db"
-EMAIL_DATASET_REPO_ID = "corbt/enron-emails"        # 허깅페이스에 있는 데이터셋 레포 아이디 
-SCENARIO_DATASET_REPO_ID = "corbt/enron_emails_sample_questions"
+EMAIL_DATASET_REPO_ID = "corbt/enron-emails"        # 허깅페이스에 있는 데이터셋 레포 아이디 : llm-agent가 검색하고 이메일을 찾을 주체 
+SCENARIO_DATASET_REPO_ID = "corbt/enron_emails_sample_questions"    # llm-agent를 학습시키기 위한 질문 샘플들
 
 # Global database connection
 db_conn = None

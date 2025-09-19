@@ -1,0 +1,30 @@
+# ART와 LangGraph 관련
+openpipe-art[backend,langgraph]==0.4.11
+langchain-core
+langgraph
+langchain_openai
+langchain
+
+# 데이터 처리
+datasets
+pandas
+numpy
+
+# 비동기 및 재시도
+tenacity
+asyncio
+
+# 유틸리티
+pydantic
+python-dotenv
+tqdm
+
+# LLM 통신
+litellm
+
+# 실험 로깅 (선택사항)
+wandb
+weave
+
+# 데이터베이스
+sqlite3  # Python 내장, 명시적으로 추가할 필요 없음

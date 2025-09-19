@@ -1,6 +1,10 @@
+#!/usr/bin/env python3
 import random
-
-
+import os
+import weave
+import asyncio
+import tempfile
+import shutil
 
 # Training configuration
 import art
@@ -13,215 +17,185 @@ from tasks.email.scenarios import load_training_scenarios
 from tasks.email.rollout import rollout
 from tasks.email.model import EmailScenario
 
-training_config = {
-    "groups_per_step": 2,
-    "num_epochs": 20,
-    "rollouts_per_group": 4,
-    "learning_rate": 1e-5,
-    "max_steps": 20,
-}
+from dotenv import load_dotenv
+
+def cleanup_art_directories():
+    """Clean up any existing .art directories"""
+    for item in os.listdir("."):
+        if item.startswith(".art"):
+            if os.path.isdir(item):
+                print(f"Removing old directory: {item}")
+                shutil.rmtree(item, ignore_errors=True)
+
+async def run_training():
+    load_dotenv()
+
+    # 환경 변수 체크
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise ValueError("OPENAI_API_KEY is required for RULER functionality.")
+
+    training_config = {
+        "groups_per_step": 2,
+        "num_epochs": 20,
+        "rollouts_per_group": 4,
+        "learning_rate": 1e-5,
+        "max_steps": 20,
+    }
+    SCENARIO_DATASET_REPO_ID = "corbt/enron_emails_sample_questions"
 
 
-
-
-
-####################  1. Load training scenarios ################### 
-training_scenarios = load_training_scenarios(
-    split="train", limit=50, max_messages=1, shuffle=True, seed=42
-)
-
-print("Email search environment created with full Enron dataset!")
-print(
-    f"Database contains the complete email dataset, loaded {len(training_scenarios)} training scenarios."
-)
-
-# print first scenario
-print("\nSample scenario")
-print("id:", training_scenarios[0].id)
-print("question:", training_scenarios[0].question)
-print("answer:", training_scenarios[0].answer)
-print("message_ids:", training_scenarios[0].message_ids)
-print("how_realistic:", training_scenarios[0].how_realistic)
-print("inbox_address:", training_scenarios[0].inbox_address)
-print("query_date:", training_scenarios[0].query_date)
-print("split:", training_scenarios[0].split)
-
-
-
-###################  2. Creating a Model ################### 
-random.seed(42)
-
-# Declare the model
-model = art.TrainableModel(
-    name="email-agent-langgraph-001",
-    project="email-search-agent-langgraph",
-    base_model="Qwen/Qwen2.5-7B-Instruct",
-)
-
-# To run on a T4, we need to override some config defaults.
-model._internal_config = art.dev.InternalModelConfig(
-    init_args=art.dev.InitArgs(
-        max_seq_length=8192,
-    ),
-    engine_args=art.dev.EngineArgs(
-        enforce_eager=True,
-        gpu_memory_utilization=0.8,
-    ),
-)
-
-# Initialize the server
-backend = LocalBackend(
-    # Normally we don't want to run the server in-process, but for the output
-    # to show up properly on Google Colab we'll enable this.
-    in_process=True,
-    path="./.art",
-)
-
-# Register the model with the local Backend (sets up logging, inference, and training)
-await model.register(backend)
-
-
-
-
-# Use iterate_dataset with real training scenarios (similar to train.py)
-training_iterator = iterate_dataset(
-    training_scenarios,  # Use real scenarios from Hugging Face
-    groups_per_step=training_config["groups_per_step"],
-    num_epochs=training_config["num_epochs"],
-    initial_step=await model.get_step(),
-)
-
-for batch in training_iterator:
-    print(
-        f"Training step {batch.step}, epoch {batch.epoch}, epoch step {batch.epoch_step}"
-    )
-    print(f"Batch contains {len(batch.items)} scenarios")
-
-    # Create trajectory groups for this batch (similar to train.py)
-    groups = []
-    for scenario in batch.items:
-        groups.append(
-            art.TrajectoryGroup(
-                (
-                    wrap_rollout(model, rollout)(
-                        model, EmailScenario(step=batch.step, scenario=scenario)
-                    )
-                    for _ in range(training_config["rollouts_per_group"])
-                )
-            )
-        )
-    print(groups[0])
-    # Gather all trajectory groups
-    finished_groups = await art.gather_trajectory_groups(
-        groups,
-        pbar_desc="gather",
-        max_exceptions=training_config["rollouts_per_group"] * len(batch.items),
-    )
-
-    judged_groups = []
-    for group in finished_groups:
-        # Use RULER to assign relative scores to each trajectory
-        judged_group = await ruler_score_group(group, "openai/o4-mini", debug=True)
-        judged_groups.append(judged_group)
-
-    await model.delete_checkpoints()
-    await model.train(
-        judged_groups,
-        config=art.TrainConfig(learning_rate=training_config["learning_rate"]),
-        # Lowering the logprob_calculation_chunk_size is a memory saving measure
-        # to allow longer sequences (up to 8192 tokens) to be processed on a T4.
-        _config={"logprob_calculation_chunk_size": 8},
-    )
-
-    print(f"Completed training step {batch.step}")
-
-    # Stop after max_steps for demo purposes (adjust as needed)
-    if batch.step >= training_config["max_steps"]:
-        break
+    # Clean up before starting
+    cleanup_art_directories()
     
+    ####################  1. Load training scenarios ################### 
+    training_scenarios = load_training_scenarios(
+        split="train", limit=50, max_messages=1, shuffle=True, seed=42,
+        SCENARIO_DATASET_REPO_ID=SCENARIO_DATASET_REPO_ID
+    
+    )
 
-################### 3. Inference ################### 
+    print("Email search environment created with full Enron dataset!")
+    print(
+        f"Database contains the complete email dataset, loaded {len(training_scenarios)} training scenarios."
+    )
 
-#@title Loading/inference code
+    # print first scenario
+    print("\nSample scenario")
+    print("id:", training_scenarios[0].id)
+    print("question:", training_scenarios[0].question)
+    print("answer:", training_scenarios[0].answer)
 
-# Test the trained model using the rollout function
-# This avoids memory issues and uses the same inference path as training
+    ###################  2. Creating a Model ################### 
+    random.seed(42)
 
-print("Testing the trained LangGraph model with a real scenario...\n")
-
-
-# Use a scenario from our training set
-test_scenario = training_scenarios[1]
-
-print(f"Test scenario ID: {test_scenario.id}")
-print(f"Question: {test_scenario.question}")
-print(f"Expected answer: {test_scenario.answer}")
-print(f"Reference message IDs: {test_scenario.message_ids}")
-print(f"Inbox: {test_scenario.inbox_address}")
-print(f"Query date: {test_scenario.query_date}")
-print("-" * 50)
-
-# Run the rollout function with the trained model
-test_email_scenario = EmailScenario.model_validate(
-    {"step": 0, "scenario": test_scenario.model_dump()}
-)
-result_trajectory = await wrap_rollout(model, rollout)(model, test_email_scenario)
-
-print("LangGraph Agent's trajectory:")
-print("-" * 20)
-
-# Display the conversation
-messages = result_trajectory.messages()
-for i, msg in enumerate(messages):
-    role = msg.get("role", "unknown")
-    content = msg.get("content", "")
-    tool_calls = msg.get("tool_calls", [])
-
-    if role == "system":
-        print(
-            f"[SYSTEM]: {content[:100]}..."
-            if len(content) > 100
-            else f"[SYSTEM]: {content}"
-        )
-    elif role == "user":
-        print(f"[USER]: {content}")
-    elif role == "assistant":
-        if tool_calls:
-            print(f"[ASSISTANT]: {tool_calls}")
-        if content:
-            print(f"[ASSISTANT]: {content}")
-    elif role == "tool":
-        tool_name = msg.get("name", "unknown_tool")
-        print(
-            f"[TOOL - {tool_name}]: {content[:200]}..."
-            if len(content) > 200
-            else f"[TOOL - {tool_name}]: {content}"
+    # Use a simpler backend configuration
+    with tempfile.TemporaryDirectory(prefix="art_") as temp_dir:
+        
+        # Declare the model
+        model = art.TrainableModel(
+            name="email-agent-langgraph-test",
+            project="email-search-agent-test",
+            base_model="Qwen/Qwen2.5-7B-Instruct",
         )
 
-    print()
+        # Simplified config for testing
+        model._internal_config = art.dev.InternalModelConfig(
+            init_args=art.dev.InitArgs(
+                max_seq_length=4096,  # Reduced
+            ),
+            engine_args=art.dev.EngineArgs(
+                enforce_eager=True,
+                gpu_memory_utilization=0.7,  # Reduced
+            ),
+        )
 
-print("-" * 50)
-if result_trajectory.final_answer:
-    print(f"Agent's Final Answer: {result_trajectory.final_answer.answer}")
-    print(f"Source IDs Used: {result_trajectory.final_answer.source_ids}")
-else:
-    print("No final answer provided by the agent")
+        # Initialize the server with temporary directory
+        backend = LocalBackend(
+            in_process=True,  # Keep in process but use temp directory
+            path=temp_dir,
+        )
 
-print(f"\nExpected Answer: {test_scenario.answer}")
-print(f"Expected Source IDs: {test_scenario.message_ids}")
+        try:
+            print("Registering model with backend...")
+            await model.register(backend)
+            print("Model registered successfully!")
 
-print("\n🎉 LangGraph email search agent testing completed!")
-print(
-    "The agent used LangGraph's ReAct pattern with the same inference path as during training."
-)
+            # Weave 초기화 (optional)
+            if os.getenv("WANDB_API_KEY", ""):
+                weave.init(model.project, settings={"print_call_link": False})
 
+            ################### 3. Training Loop ################### 
+            training_iterator = iterate_dataset(
+                training_scenarios,
+                groups_per_step=training_config["groups_per_step"],
+                num_epochs=training_config["num_epochs"],
+                initial_step=await model.get_step(),
+            )
 
+            for batch in training_iterator:
+                print(
+                    f"Training step {batch.step}, epoch {batch.epoch}, epoch step {batch.epoch_step}"
+                )
+                print(f"Batch contains {len(batch.items)} scenarios")
 
+                # Create trajectory groups for this batch
+                groups = []
+                for scenario in batch.items:
+                    groups.append(
+                        art.TrajectoryGroup(
+                            (
+                                wrap_rollout(model, rollout)(
+                                    model, EmailScenario(step=batch.step, scenario=scenario)
+                                )
+                                for _ in range(training_config["rollouts_per_group"])
+                            )
+                        )
+                    )
+                
+                print(f"Created {len(groups)} trajectory groups")
+                
+                # Gather all trajectory groups
+                finished_groups = await art.gather_trajectory_groups(
+                    groups,
+                    pbar_desc="gather",
+                    max_exceptions=training_config["rollouts_per_group"] * len(batch.items),
+                )
 
+                judged_groups = []
+                for group in finished_groups:
+                    # Use RULER to assign relative scores to each trajectory
+                    judged_group = await ruler_score_group(group, "openai/o4-mini", debug=True)
+                    if judged_group:
+                        judged_groups.append(judged_group)
 
+                if judged_groups:
+                    await model.delete_checkpoints()
+                    await model.train(
+                        judged_groups,
+                        config=art.TrainConfig(learning_rate=training_config["learning_rate"]),
+                        _config={"logprob_calculation_chunk_size": 16},
+                    )
+                    print(f"Completed training step {batch.step}")
+                else:
+                    print(f"No judged groups for step {batch.step}, skipping training")
 
+                # Stop after max_steps
+                if batch.step >= training_config["max_steps"]:
+                    break
 
+            ################### 4. Simple Test ################### 
+            print("Testing the trained model...\n")
 
+            test_scenario = training_scenarios[0]
+            print(f"Test scenario: {test_scenario.question}")
+            
+            test_email_scenario = EmailScenario(step=0, scenario=test_scenario)
+            result_trajectory = await wrap_rollout(model, rollout)(model, test_email_scenario)
 
+            if result_trajectory.final_answer:
+                print(f"Agent's Answer: {result_trajectory.final_answer.answer}")
+                print(f"Expected Answer: {test_scenario.answer}")
+            else:
+                print("No final answer provided")
 
+            print("\n🎉 Training completed!")
+            
+        except Exception as e:
+            print(f"Error: {e}")
+            raise
+        finally:
+            # Cleanup happens automatically with temporary directory
+            pass
 
+def main():
+    try:
+        asyncio.run(run_training())
+    except KeyboardInterrupt:
+        print("\nTraining interrupted")
+    except Exception as e:
+        print(f"Training failed: {e}")
+        return 1
+    return 0
+
+if __name__ == "__main__":
+    exit(main())
